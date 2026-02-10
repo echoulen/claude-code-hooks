@@ -2,7 +2,7 @@
 
 当 Claude Code（含 Agent Teams）完成任务后，自动：
 1. 将结果写入 JSON 文件
-2. 发送 Telegram 通知到指定群组
+2. 发送 聊天软件 通知到指定群组
 3. 写入 pending-wake 文件供 AGI 主会话读取
 
 ## 架构
@@ -19,7 +19,7 @@ dispatch-claude-code.sh
       ├─ notify-agi.sh 执行：
       │   ├─ 读取 task-meta.json + task-output.txt
       │   ├─ 写入 latest.json（完整结果）
-      │   ├─ openclaw message send → Telegram 群
+      │   ├─ openclaw message send → 聊天软件 群
       │   └─ 写入 pending-wake.json
       │
       └─ AGI heartbeat 读取 pending-wake.json（备选）
@@ -64,7 +64,7 @@ dispatch-claude-code.sh \
 |------|------|
 | `-p, --prompt` | 任务提示（必需）|
 | `-n, --name` | 任务名称（用于跟踪）|
-| `-g, --group` | Telegram 群组 ID（结果自动发送）|
+| `-g, --group` | 聊天软件 群组 ID（结果自动发送）|
 | `-w, --workdir` | 工作目录 |
 | `--agent-teams` | 启用 Agent Teams |
 | `--teammate-mode` | Agent Teams 模式 (auto/in-process/tmux) |
