@@ -1,139 +1,104 @@
-# Claude Code Hooks — 任务完成自动回调
+# Claude Code Stop Hook — 任务完成自动回调
 
-Claude Code 完成任务后通过 Hook 自动通知 OpenClaw AGI，无需轮询，节省 token。
+当 Claude Code（含 Agent Teams）完成任务后，自动：
+1. 将结果写入 JSON 文件
+2. 发送 Telegram 通知到指定群组
+3. 写入 pending-wake 文件供 AGI 主会话读取
 
-## 原理
-
-```
-AGI 下达任务 → Claude Code 自主工作 → Stop Hook 触发 → 写结果 + 通知 AGI
-   (1次调用)      (0 token 消耗)        (自动)          (AGI 读结果 1次)
-```
-
-## 文件结构
+## 架构
 
 ```
-├── hooks/
-│   └── notify-agi.sh          # Hook 回调脚本
-├── scripts/
-│   └── run-claude-code.sh     # 启动脚本（注入环境变量）
-├── claude-settings.json       # Claude Code Hook 配置
-└── README.md
+dispatch-claude-code.sh
+  │
+  ├─ 写入 task-meta.json（任务名、目标群组）
+  ├─ 启动 Claude Code（via claude_code_run.py）
+  │   └─ Agent Teams lead + sub-agents 运行
+  │
+  └─ Claude Code 完成 → Stop Hook 自动触发
+      │
+      ├─ notify-agi.sh 执行：
+      │   ├─ 读取 task-meta.json + task-output.txt
+      │   ├─ 写入 latest.json（完整结果）
+      │   ├─ openclaw message send → Telegram 群
+      │   └─ 写入 pending-wake.json
+      │
+      └─ AGI heartbeat 读取 pending-wake.json（备选）
 ```
 
-## 安装
+## 文件说明
 
-### 1. 复制 Hook 脚本
+| 文件 | 位置 | 作用 |
+|------|------|------|
+| `hooks/notify-agi.sh` | `~/.claude/hooks/` | Stop Hook 脚本 |
+| `hooks/claude-settings.json` | `~/.claude/settings.json` | Claude Code 配置（注册 hook）|
+| `scripts/dispatch-claude-code.sh` | 任意位置 | 一键派发任务 |
+| `scripts/claude_code_run.py` | 任意位置 | Claude Code PTY 运行器 |
+
+## 使用方法
+
+### 基础任务
 ```bash
-mkdir -p ~/.claude/hooks
-cp hooks/notify-agi.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/notify-agi.sh
+dispatch-claude-code.sh \
+  -p "实现一个 Python 爬虫" \
+  -n "my-scraper" \
+  -g "-5189558203" \
+  --permission-mode "bypassPermissions" \
+  --workdir "/home/ubuntu/projects/scraper"
 ```
 
-### 2. 配置 Claude Code
-将 `claude-settings.json` 的 hooks 部分合并到你的 `~/.claude/settings.json`：
+### Agent Teams 任务
+```bash
+dispatch-claude-code.sh \
+  -p "重构整个项目的测试" \
+  -n "test-refactor" \
+  -g "-5189558203" \
+  --agent-teams \
+  --teammate-mode auto \
+  --permission-mode "bypassPermissions" \
+  --workdir "/home/ubuntu/projects/myapp"
+```
+
+### 参数
+
+| 参数 | 说明 |
+|------|------|
+| `-p, --prompt` | 任务提示（必需）|
+| `-n, --name` | 任务名称（用于跟踪）|
+| `-g, --group` | Telegram 群组 ID（结果自动发送）|
+| `-w, --workdir` | 工作目录 |
+| `--agent-teams` | 启用 Agent Teams |
+| `--teammate-mode` | Agent Teams 模式 (auto/in-process/tmux) |
+| `--permission-mode` | 权限模式 |
+| `--allowed-tools` | 允许的工具列表 |
+
+## Hook 配置
+
+在 `~/.claude/settings.json` 中注册：
 ```json
 {
   "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/ubuntu/.claude/hooks/notify-agi.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/ubuntu/.claude/hooks/notify-agi.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
+    "Stop": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/notify-agi.sh", "timeout": 10}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/notify-agi.sh", "timeout": 10}]}]
   }
 }
 ```
 
-### 3. 设置环境变量
-```bash
-export OPENCLAW_GATEWAY_TOKEN="your-gateway-token"
-```
+## 防重复机制
 
-### 4. 安装依赖
-```bash
-# 需要 jq 和 curl
-sudo apt install jq curl  # Debian/Ubuntu
-brew install jq curl       # macOS
-```
+Hook 在 Stop 和 SessionEnd 都会触发。脚本使用 `.hook-lock` 文件去重：
+- 30秒内重复触发自动跳过
+- 只处理第一个事件（通常是 Stop）
 
-## 使用
+## 结果文件
 
-### 派发任务（AGI 端）
-```bash
-cd /path/to/workdir && nohup bash -c '
-OPENCLAW_GATEWAY_TOKEN="<token>" \
-python3 /path/to/claude_code_run.py \
-  -p "你的任务描述" \
-  --permission-mode plan \
-  --allowedTools "Read,Bash" \
-  2>&1 | tee /tmp/claude-code-output.txt
-' > /dev/null 2>&1 &
-```
-
-### 读取结果
-任务完成后，结果自动写入：
-```bash
-cat /home/ubuntu/clawd/data/claude-code-results/latest.json
-```
-
-结果 JSON 格式：
+任务完成后，结果写入 `/home/ubuntu/clawd/data/claude-code-results/latest.json`：
 ```json
 {
-  "session_id": "abc123",
-  "timestamp": "2026-02-09T14:54:27+00:00",
-  "cwd": "/home/ubuntu/projects/my-project",
-  "event": "SessionEnd",
-  "output": "Claude Code 的输出内容...",
+  "session_id": "...",
+  "timestamp": "2026-02-10T01:02:33+00:00",
+  "task_name": "fibonacci-demo",
+  "telegram_group": "-5189558203",
+  "output": "...",
   "status": "done"
 }
 ```
-
-## 通知方式
-
-Hook 触发后会：
-1. **写结果文件**: `data/claude-code-results/latest.json`
-2. **发送 wake event**: 通过 OpenClaw Gateway API（`POST /api/cron/wake`）唤醒 AGI 主 session
-
-## 注意事项
-
-- ✅ 兼容 PTY 和非 PTY 环境
-- ✅ Stop + SessionEnd 双重 Hook 保障
-- ⚠️ 需要 `OPENCLAW_GATEWAY_TOKEN` 才能发 wake event
-- ⚠️ 建议用 `claude_code_run.py` wrapper 启动（带 PTY 支持）
-- ⚠️ 直接 `claude -p` 在某些 exec 环境可能卡住
-
-## Token 节省
-
-| 方式 | AGI 调用次数 | 等待期间消耗 |
-|------|-------------|-------------|
-| 轮询 | 3-5 次 | 每次都消耗 token |
-| Hook | 2 次 | 0 |
-
-## 自定义
-
-修改 `notify-agi.sh` 中的结果目录：
-```bash
-RESULT_DIR="/your/custom/path"
-```
-
-修改通知方式（如发 Telegram、Slack 等）：在脚本末尾添加对应的 API 调用。
-
-## License
-
-MIT
