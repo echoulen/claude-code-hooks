@@ -25,9 +25,6 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_CLAUDE = os.environ.get("CLAUDE_CODE_BIN", "/home/ubuntu/.local/bin/claude")
-
-
 def which(name: str) -> str | None:
     paths = os.environ.get("PATH", "").split(":")
     for p in paths:
@@ -38,6 +35,20 @@ def which(name: str) -> str | None:
         except OSError:
             pass
     return None
+
+
+def _resolve_default_claude() -> str:
+    """Resolve the claude binary: env var > PATH lookup > fallback 'claude'."""
+    env_bin = os.environ.get("CLAUDE_CODE_BIN")
+    if env_bin:
+        return env_bin
+    found = which("claude")
+    if found:
+        return found
+    return "claude"
+
+
+DEFAULT_CLAUDE = _resolve_default_claude()
 
 
 def looks_like_slash_commands(prompt: str | None) -> bool:
@@ -105,7 +116,12 @@ def run_with_pty(cmd: list[str], cwd: str | None, env: dict[str, str] | None = N
         proc = subprocess.run(cmd, cwd=cwd, text=True, env=env)
         return proc.returncode
 
-    proc = subprocess.run([script_bin, "-q", "-c", cmd_str, "/dev/null"], cwd=cwd, text=True, env=env)
+    # macOS (BSD) script: script -q /dev/null <command>
+    # Linux (GNU) script: script -q -c <command> /dev/null
+    if sys.platform == "darwin":
+        proc = subprocess.run([script_bin, "-q", "/dev/null"] + cmd, cwd=cwd, text=True, env=env)
+    else:
+        proc = subprocess.run([script_bin, "-q", "-c", cmd_str, "/dev/null"], cwd=cwd, text=True, env=env)
     return proc.returncode
 
 
@@ -278,10 +294,12 @@ def main() -> int:
         extra = extra[1:]
     args.extra = extra
 
-    if not Path(args.claude_bin).exists():
+    resolved = which(args.claude_bin) or args.claude_bin
+    if not Path(resolved).exists():
         print(f"claude binary not found: {args.claude_bin}", file=sys.stderr)
-        print("Tip: set CLAUDE_CODE_BIN=/path/to/claude", file=sys.stderr)
+        print("Tip: set CLAUDE_CODE_BIN=/path/to/claude or ensure 'claude' is in PATH", file=sys.stderr)
         return 2
+    args.claude_bin = resolved
 
     mode = args.mode
     if mode == "auto" and looks_like_slash_commands(args.prompt):

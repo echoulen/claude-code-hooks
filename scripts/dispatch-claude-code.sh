@@ -25,19 +25,29 @@
 
 set -euo pipefail
 
+# ---- Cross-platform helpers (GNU Linux / BSD macOS) ----
+date_iso() {
+    if date -Iseconds >/dev/null 2>&1; then
+        date -Iseconds
+    else
+        date -u +"%Y-%m-%dT%H:%M:%S%z"
+    fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-RESULT_DIR="/home/ubuntu/clawd/data/claude-code-results"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+RESULT_DIR="${CLAUDE_CODE_RESULT_DIR:-${REPO_DIR}/data/claude-code-results}"
 META_FILE="${RESULT_DIR}/task-meta.json"
-OUTPUT_FILE="/tmp/claude-code-output.txt"
+OUTPUT_FILE="${RESULT_DIR}/claude-code-output.txt"
 TASK_OUTPUT="${RESULT_DIR}/task-output.txt"
-RUNNER="/home/ubuntu/clawd/skills/claude-code-clawdbot/scripts/claude_code_run.py"
+RUNNER="${SCRIPT_DIR}/claude_code_run.py"
 
 # Defaults
 PROMPT=""
 TASK_NAME="adhoc-$(date +%s)"
 TELEGRAM_GROUP=""
 CALLBACK_SESSION=""
-WORKDIR="/home/ubuntu/clawd"
+WORKDIR="$(pwd)"
 AGENT_TEAMS=""
 TEAMMATE_MODE=""
 PERMISSION_MODE=""
@@ -75,7 +85,7 @@ jq -n \
     --arg session "$CALLBACK_SESSION" \
     --arg prompt "$PROMPT" \
     --arg workdir "$WORKDIR" \
-    --arg ts "$(date -Iseconds)" \
+    --arg ts "$(date_iso)" \
     --arg agent_teams "${AGENT_TEAMS:-0}" \
     '{task_name: $name, telegram_group: $group, callback_session: $session, prompt: $prompt, workdir: $workdir, started_at: $ts, agent_teams: ($agent_teams == "1"), status: "running"}' \
     > "$META_FILE"
@@ -129,7 +139,7 @@ echo "   Results: ${RESULT_DIR}/latest.json"
 
 # Update meta with completion
 if [ -f "$META_FILE" ]; then
-    jq --arg code "$EXIT_CODE" --arg ts "$(date -Iseconds)" \
+    jq --arg code "$EXIT_CODE" --arg ts "$(date_iso)" \
         '. + {exit_code: ($code | tonumber), completed_at: $ts, status: "done"}' \
         "$META_FILE" > "${META_FILE}.tmp" && mv "${META_FILE}.tmp" "$META_FILE"
 fi

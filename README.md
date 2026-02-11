@@ -27,35 +27,46 @@ dispatch-claude-code.sh
 
 ## 文件说明
 
-| 文件 | 位置 | 作用 |
-|------|------|------|
-| `hooks/notify-agi.sh` | `~/.claude/hooks/` | Stop Hook 脚本 |
-| `hooks/claude-settings.json` | `~/.claude/settings.json` | Claude Code 配置（注册 hook）|
-| `scripts/dispatch-claude-code.sh` | 任意位置 | 一键派发任务 |
-| `scripts/claude_code_run.py` | 任意位置 | Claude Code PTY 运行器 |
+| 文件 | 作用 |
+|------|------|
+| `hooks/notify-agi.sh` | Stop Hook 脚本（路径自动从脚本位置推导）|
+| `hooks/claude-settings.json` | Claude Code 配置模板（`<REPO_DIR>` 占位符）|
+| `scripts/dispatch-claude-code.sh` | 一键派发任务 |
+| `scripts/claude_code_run.py` | Claude Code PTY 运行器 |
+| `scripts/run-claude-code.sh` | 简易 Claude Code 启动脚本 |
+| `setup.sh` | 自动生成含正确路径的 `claude-settings.local.json` |
+
+## 安装
+
+```bash
+git clone <repo-url> && cd claude-code-hooks
+./setup.sh
+```
+
+`setup.sh` 会自动检测 repo 路径，生成 `claude-settings.local.json`，将其内容合并到 `~/.claude/settings.json` 即可。
 
 ## 使用方法
 
 ### 基础任务
 ```bash
-dispatch-claude-code.sh \
+./scripts/dispatch-claude-code.sh \
   -p "实现一个 Python 爬虫" \
   -n "my-scraper" \
   -g "-5189558203" \
   --permission-mode "bypassPermissions" \
-  --workdir "/home/ubuntu/projects/scraper"
+  --workdir "$HOME/projects/scraper"
 ```
 
 ### Agent Teams 任务
 ```bash
-dispatch-claude-code.sh \
+./scripts/dispatch-claude-code.sh \
   -p "重构整个项目的测试" \
   -n "test-refactor" \
   -g "-5189558203" \
   --agent-teams \
   --teammate-mode auto \
   --permission-mode "bypassPermissions" \
-  --workdir "/home/ubuntu/projects/myapp"
+  --workdir "$HOME/projects/myapp"
 ```
 
 ### 参数
@@ -73,15 +84,25 @@ dispatch-claude-code.sh \
 
 ## Hook 配置
 
-在 `~/.claude/settings.json` 中注册：
+运行 `./setup.sh` 自动生成配置，或手动在 `~/.claude/settings.json` 中注册（将 `<REPO_DIR>` 替换为实际路径）：
 ```json
 {
   "hooks": {
-    "Stop": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/notify-agi.sh", "timeout": 10}]}],
-    "SessionEnd": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/notify-agi.sh", "timeout": 10}]}]
+    "Stop": [{"hooks": [{"type": "command", "command": "<REPO_DIR>/hooks/notify-agi.sh", "timeout": 10}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "<REPO_DIR>/hooks/notify-agi.sh", "timeout": 10}]}]
   }
 }
 ```
+
+## 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `CLAUDE_CODE_BIN` | claude 二进制路径 | 自动从 PATH 查找 |
+| `CLAUDE_CODE_RESULT_DIR` | 结果输出目录 | `<REPO_DIR>/data/claude-code-results` |
+| `OPENCLAW_BIN` | openclaw 二进制路径 | 自动从 PATH 查找 |
+| `OPENCLAW_GATEWAY_TOKEN` | OpenClaw 网关 token | （需手动设置）|
+| `OPENCLAW_GATEWAY` | OpenClaw 网关地址 | `http://127.0.0.1:18789` |
 
 ## 防重复机制
 
@@ -91,7 +112,7 @@ Hook 在 Stop 和 SessionEnd 都会触发。脚本使用 `.hook-lock` 文件去�
 
 ## 结果文件
 
-任务完成后，结果写入 `/home/ubuntu/clawd/data/claude-code-results/latest.json`：
+任务完成后，结果写入 `<REPO_DIR>/data/claude-code-results/latest.json`（或 `$CLAUDE_CODE_RESULT_DIR/latest.json`）：
 ```json
 {
   "session_id": "...",

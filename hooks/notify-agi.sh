@@ -5,14 +5,34 @@
 
 set -uo pipefail
 
-LOG="/home/ubuntu/clawd/data/claude-code-results/hook.log"
-RESULT_DIR="/home/ubuntu/clawd/data/claude-code-results"
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "${HOOK_DIR}/.." && pwd)"
+RESULT_DIR="${CLAUDE_CODE_RESULT_DIR:-${REPO_DIR}/data/claude-code-results}"
+LOG="${RESULT_DIR}/hook.log"
 META_FILE="${RESULT_DIR}/task-meta.json"
-OPENCLAW_BIN="/home/ubuntu/.npm-global/bin/openclaw"
+OPENCLAW_BIN="${OPENCLAW_BIN:-$(command -v openclaw 2>/dev/null || echo "openclaw")}"
 
 mkdir -p "$RESULT_DIR"
 
-log() { echo "[$(date -Iseconds)] $*" >> "$LOG"; }
+# ---- Cross-platform helpers (GNU Linux / BSD macOS) ----
+date_iso() {
+    if date -Iseconds >/dev/null 2>&1; then
+        date -Iseconds
+    else
+        date -u +"%Y-%m-%dT%H:%M:%S%z"
+    fi
+}
+
+file_mtime() {
+    # Return file modification time as epoch seconds
+    if stat -c %Y "$1" >/dev/null 2>&1; then
+        stat -c %Y "$1"
+    else
+        stat -f %m "$1" 2>/dev/null || echo 0
+    fi
+}
+
+log() { echo "[$(date_iso)] $*" >> "$LOG"; }
 
 log "=== Hook fired ==="
 
@@ -21,7 +41,15 @@ INPUT=""
 if [ -t 0 ]; then
     log "stdin is tty, skip"
 elif [ -e /dev/stdin ]; then
-    INPUT=$(timeout 2 cat /dev/stdin 2>/dev/null || true)
+    if command -v timeout >/dev/null 2>&1; then
+        INPUT=$(timeout 2 cat /dev/stdin 2>/dev/null || true)
+    else
+        # macOS fallback: use read with timeout
+        INPUT=$(cat /dev/stdin &
+            PID=$!
+            sleep 2 && kill "$PID" 2>/dev/null &
+            wait "$PID" 2>/dev/null || true)
+    fi
 fi
 
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"' 2>/dev/null || echo "unknown")
@@ -35,7 +63,7 @@ LOCK_FILE="${RESULT_DIR}/.hook-lock"
 LOCK_AGE_LIMIT=30  # 30秒内重复触发视为同一任务
 
 if [ -f "$LOCK_FILE" ]; then
-    LOCK_TIME=$(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0)
+    LOCK_TIME=$(file_mtime "$LOCK_FILE")
     NOW=$(date +%s)
     AGE=$(( NOW - LOCK_TIME ))
     if [ "$AGE" -lt "$LOCK_AGE_LIMIT" ]; then
@@ -58,10 +86,11 @@ if [ -f "$TASK_OUTPUT" ] && [ -s "$TASK_OUTPUT" ]; then
     log "Output from task-output.txt (${#OUTPUT} chars)"
 fi
 
-# 来源2: /tmp/claude-code-output.txt
-if [ -z "$OUTPUT" ] && [ -f "/tmp/claude-code-output.txt" ] && [ -s "/tmp/claude-code-output.txt" ]; then
-    OUTPUT=$(tail -c 4000 /tmp/claude-code-output.txt)
-    log "Output from /tmp fallback (${#OUTPUT} chars)"
+# 来源2: claude-code-output.txt (in RESULT_DIR)
+FALLBACK_OUTPUT="${RESULT_DIR}/claude-code-output.txt"
+if [ -z "$OUTPUT" ] && [ -f "$FALLBACK_OUTPUT" ] && [ -s "$FALLBACK_OUTPUT" ]; then
+    OUTPUT=$(tail -c 4000 "$FALLBACK_OUTPUT")
+    log "Output from fallback ${FALLBACK_OUTPUT} (${#OUTPUT} chars)"
 fi
 
 # 来源3: 工作目录
@@ -84,7 +113,7 @@ fi
 # ---- 写入结果 JSON ----
 jq -n \
     --arg sid "$SESSION_ID" \
-    --arg ts "$(date -Iseconds)" \
+    --arg ts "$(date_iso)" \
     --arg cwd "$CWD" \
     --arg event "$EVENT" \
     --arg output "$OUTPUT" \
@@ -117,7 +146,7 @@ WAKE_FILE="${RESULT_DIR}/pending-wake.json"
 jq -n \
     --arg task "$TASK_NAME" \
     --arg group "$TELEGRAM_GROUP" \
-    --arg ts "$(date -Iseconds)" \
+    --arg ts "$(date_iso)" \
     --arg summary "$(echo "$OUTPUT" | head -c 500 | tr '\n' ' ')" \
     '{task_name: $task, telegram_group: $group, timestamp: $ts, summary: $summary, processed: false}' \
     > "$WAKE_FILE" 2>/dev/null

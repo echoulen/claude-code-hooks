@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/ubuntu/.claude/hooks/notify-agi.sh",
+            "command": "<REPO_DIR>/hooks/notify-agi.sh",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/ubuntu/.claude/hooks/notify-agi.sh",
+            "command": "<REPO_DIR>/hooks/notify-agi.sh",
             "timeout": 10
           }
         ]
