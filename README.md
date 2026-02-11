@@ -1,13 +1,14 @@
 # Claude Code Stop Hook — 任务完成自动回调
 
 当 Claude Code（含 Agent Teams）完成任务后，自动：
+
 1. 将结果写入 JSON 文件
 2. 发送 聊天软件 通知到指定群组
 3. 写入 pending-wake 文件供 AGI 主会话读取
 
 ## 架构
 
-```
+```text
 dispatch-claude-code.sh
   │
   ├─ 写入 task-meta.json（任务名、目标群组）
@@ -29,6 +30,7 @@ dispatch-claude-code.sh
 
 | 文件 | 作用 |
 |------|------|
+
 | `hooks/notify-agi.sh` | Stop Hook 脚本（路径自动从脚本位置推导）|
 | `hooks/claude-settings.json` | Claude Code 配置模板（`<REPO_DIR>` 占位符）|
 | `scripts/dispatch-claude-code.sh` | 一键派发任务 |
@@ -48,6 +50,7 @@ git clone <repo-url> && cd claude-code-hooks
 ## 使用方法
 
 ### 基础任务
+
 ```bash
 ./scripts/dispatch-claude-code.sh \
   -p "实现一个 Python 爬虫" \
@@ -58,6 +61,7 @@ git clone <repo-url> && cd claude-code-hooks
 ```
 
 ### Agent Teams 任务
+
 ```bash
 ./scripts/dispatch-claude-code.sh \
   -p "重构整个项目的测试" \
@@ -73,6 +77,7 @@ git clone <repo-url> && cd claude-code-hooks
 
 | 参数 | 说明 |
 |------|------|
+
 | `-p, --prompt` | 任务提示（必需）|
 | `-n, --name` | 任务名称（用于跟踪）|
 | `-g, --group` | 聊天软件 群组 ID（结果自动发送）|
@@ -85,6 +90,7 @@ git clone <repo-url> && cd claude-code-hooks
 ## Hook 配置
 
 运行 `./setup.sh` 自动生成配置，或手动在 `~/.claude/settings.json` 中注册（将 `<REPO_DIR>` 替换为实际路径）：
+
 ```json
 {
   "hooks": {
@@ -98,6 +104,7 @@ git clone <repo-url> && cd claude-code-hooks
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
+
 | `CLAUDE_CODE_BIN` | claude 二进制路径 | 自动从 PATH 查找 |
 | `CLAUDE_CODE_RESULT_DIR` | 结果输出目录 | `<REPO_DIR>/data/claude-code-results` |
 | `OPENCLAW_BIN` | openclaw 二进制路径 | 自动从 PATH 查找 |
@@ -107,12 +114,14 @@ git clone <repo-url> && cd claude-code-hooks
 ## 防重复机制
 
 Hook 在 Stop 和 SessionEnd 都会触发。脚本使用 `.hook-lock` 文件去重：
+
 - 30秒内重复触发自动跳过
 - 只处理第一个事件（通常是 Stop）
 
 ## 结果文件
 
 任务完成后，结果写入 `<REPO_DIR>/data/claude-code-results/latest.json`（或 `$CLAUDE_CODE_RESULT_DIR/latest.json`）：
+
 ```json
 {
   "session_id": "...",
